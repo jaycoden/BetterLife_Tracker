@@ -12,6 +12,8 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [showStoredInfo, setShowStoredInfo] = useState(false);
+  const [storedUser, setStoredUser] = useState<any>(null);
 
   const handleEmailLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -24,6 +26,17 @@ export default function LoginPage() {
     } catch (err: any) {
       setError(err.message);
       setLoading(false);
+    }
+  };
+
+  const showMyLoginInfo = () => {
+    const userStr = localStorage.getItem('lifeos_user');
+    if (userStr) {
+      const user = JSON.parse(userStr);
+      setStoredUser(user);
+      setShowStoredInfo(true);
+    } else {
+      setError('No account found in this browser. You may need to sign up!');
     }
   };
 
@@ -81,6 +94,29 @@ export default function LoginPage() {
               {loading ? 'Signing in...' : 'Sign In'}
             </button>
           </form>
+
+          <div className="mt-6 space-y-4">
+            <button
+              type="button"
+              onClick={showMyLoginInfo}
+              className="w-full rounded-lg bg-gray-100 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-200 transition-colors"
+            >
+              🔍 Show My Saved Login Info
+            </button>
+
+            {showStoredInfo && storedUser && (
+              <div className="rounded-lg bg-green-50 border-2 border-green-300 p-4 space-y-2">
+                <p className="text-sm font-bold text-green-900">✅ Found your account!</p>
+                <div className="space-y-1 text-sm">
+                  <p><span className="font-semibold">Email:</span> {storedUser.email}</p>
+                  <p><span className="font-semibold">Name:</span> {storedUser.displayName}</p>
+                  <p className="text-xs text-green-700 mt-2">
+                    💡 Use this email and the password you created to sign in above!
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
 
           <p className="mt-6 text-center text-sm text-gray-600">
             Don't have an account?{' '}

@@ -31,6 +31,10 @@ export const getDaysAgo = (days: number): string => {
   return format(subDays(new Date(), days), 'yyyy-MM-dd');
 };
 
+export const getWeekStart = (date: Date = new Date()): string => {
+  return format(startOfWeek(date, { weekStartsOn: 1 }), 'yyyy-MM-dd');
+};
+
 export const getRelativeTimeString = (date: Date | string): string => {
   const dateObj = typeof date === 'string' ? parseISO(date) : date;
 

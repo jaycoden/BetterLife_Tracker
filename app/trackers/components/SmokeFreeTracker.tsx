@@ -4,17 +4,17 @@ import { useState, useEffect } from 'react';
 import { getTrackers, setTrackers } from '@/lib/storage/localStorage';
 import { getTodayString, formatDate } from '@/lib/utils/date';
 
-interface DayStatus {
-  date: string;
-  smokeFree: boolean;
-}
+// Three states: 'clean' (fully clean), 'cigarette' (occasional cig), 'vape' (relapse)
+type DayState = 'clean' | 'cigarette' | 'vape';
 
 export default function SmokeFreeTracker() {
-  const [quitDate, setQuitDate] = useState<string | null>(null);
+  const [quitVapeDate, setQuitVapeDate] = useState<string | null>(null);
   const [isSettingDate, setIsSettingDate] = useState(false);
   const [selectedDate, setSelectedDate] = useState(getTodayString());
-  const [dayStatuses, setDayStatuses] = useState<Record<string, boolean>>({});
+  const [dayStatuses, setDayStatuses] = useState<Record<string, DayState>>({});
   const [currentMonth, setCurrentMonth] = useState(new Date());
+  const [showDayModal, setShowDayModal] = useState(false);
+  const [selectedDayForEdit, setSelectedDayForEdit] = useState<string | null>(null);
 
   useEffect(() => {
     loadTrackerData();
@@ -22,11 +22,32 @@ export default function SmokeFreeTracker() {
 
   const loadTrackerData = () => {
     const trackers = getTrackers();
-    if (trackers.smokeFree?.quitDate) {
-      setQuitDate(trackers.smokeFree.quitDate);
-    }
+
+    // Migration: convert old boolean system to new 3-state system
     if (trackers.smokeFree?.dayStatuses) {
-      setDayStatuses(trackers.smokeFree.dayStatuses);
+      const oldStatuses = trackers.smokeFree.dayStatuses;
+      const newStatuses: Record<string, DayState> = {};
+
+      for (const [date, value] of Object.entries(oldStatuses)) {
+        if (typeof value === 'boolean') {
+          newStatuses[date] = value ? 'clean' : 'vape';
+        } else {
+          newStatuses[date] = value as DayState;
+        }
+      }
+
+      setDayStatuses(newStatuses);
+
+      // Save migrated data
+      if (!trackers.smokeFree.quitVapeDate && trackers.smokeFree.quitDate) {
+        trackers.smokeFree.quitVapeDate = trackers.smokeFree.quitDate;
+      }
+      trackers.smokeFree.dayStatuses = newStatuses;
+      setTrackers(trackers);
+    }
+
+    if (trackers.smokeFree?.quitVapeDate) {
+      setQuitVapeDate(trackers.smokeFree.quitVapeDate);
     }
   };
 
@@ -35,76 +56,146 @@ export default function SmokeFreeTracker() {
     if (!trackers.smokeFree) {
       trackers.smokeFree = {};
     }
-    trackers.smokeFree.quitDate = selectedDate;
+    trackers.smokeFree.quitVapeDate = selectedDate;
 
-    // Initialize all days from quit date to today as smoke-free
-    const statuses: Record<string, boolean> = {};
+    // Initialize all days from quit date to today as clean
+    const statuses: Record<string, DayState> = {};
     const start = new Date(selectedDate);
     const today = new Date();
     for (let d = new Date(start); d <= today; d.setDate(d.getDate() + 1)) {
       const dateStr = d.toISOString().split('T')[0];
-      statuses[dateStr] = true; // Default all to smoke-free
+      statuses[dateStr] = 'clean'; // Default all to clean
     }
     trackers.smokeFree.dayStatuses = statuses;
 
     setTrackers(trackers);
-    setQuitDate(selectedDate);
+    setQuitVapeDate(selectedDate);
     setDayStatuses(statuses);
     setIsSettingDate(false);
   };
 
-  const toggleDayStatus = (dateStr: string) => {
+  const setDayStatus = (dateStr: string, status: DayState) => {
     const trackers = getTrackers();
     if (!trackers.smokeFree) return;
 
-    const newStatuses = { ...dayStatuses, [dateStr]: !dayStatuses[dateStr] };
+    const newStatuses = { ...dayStatuses, [dateStr]: status };
     trackers.smokeFree.dayStatuses = newStatuses;
     setTrackers(trackers);
     setDayStatuses(newStatuses);
+    setShowDayModal(false);
+    setSelectedDayForEdit(null);
   };
 
-  const calculateStreak = () => {
-    if (!quitDate) return 0;
+  const openDayModal = (dateStr: string) => {
+    setSelectedDayForEdit(dateStr);
+    setShowDayModal(true);
+  };
 
-    // Start from today and go backwards
+  // Calculate vape-free streak (cigarettes don't break it)
+  const calculateVapeFreeStreak = () => {
+    if (!quitVapeDate) return 0;
+
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     let streak = 0;
 
-    for (let d = new Date(today); d >= new Date(quitDate); d.setDate(d.getDate() - 1)) {
+    for (let d = new Date(today); d >= new Date(quitVapeDate); d.setDate(d.getDate() - 1)) {
       const dateStr = d.toISOString().split('T')[0];
-      if (dayStatuses[dateStr] === true) {
-        streak++;
-      } else if (dayStatuses[dateStr] === false) {
-        break; // Streak broken
-      } else {
-        // If no data, assume smoke-free (default)
-        streak++;
+      const status = dayStatuses[dateStr] || 'clean';
+
+      if (status === 'vape') {
+        break; // Vape breaks the streak
       }
+      streak++;
+    }
+
+    return streak;
+  };
+
+  // Calculate fully clean streak (cigarettes DO break it)
+  const calculateFullyCleanStreak = () => {
+    if (!quitVapeDate) return 0;
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    let streak = 0;
+
+    for (let d = new Date(today); d >= new Date(quitVapeDate); d.setDate(d.getDate() - 1)) {
+      const dateStr = d.toISOString().split('T')[0];
+      const status = dayStatuses[dateStr] || 'clean';
+
+      if (status !== 'clean') {
+        break; // Any non-clean day breaks it
+      }
+      streak++;
     }
 
     return streak;
   };
 
   const calculateMoneySaved = () => {
-    const streak = calculateStreak();
-    // $40 every 5 days = $8 per day
-    const dailyCost = 8;
-    return Math.floor(streak * dailyCost);
+    if (!quitVapeDate) return 0;
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    let moneySaved = 0;
+
+    for (let d = new Date(quitVapeDate); d <= today; d.setDate(d.getDate() + 1)) {
+      const dateStr = d.toISOString().split('T')[0];
+      const status = dayStatuses[dateStr] || 'clean';
+
+      if (status === 'clean') {
+        moneySaved += 8;
+      } else if (status === 'cigarette') {
+        moneySaved += 6; // $8 saved - $2 spent
+      } else if (status === 'vape') {
+        moneySaved += 0; // $8 lost
+      }
+    }
+
+    return Math.floor(moneySaved);
   };
 
   const calculateLifeRegained = () => {
-    const streak = calculateStreak();
-    const cigarettesPerDay = 10; // Based on $40/5 days, rough estimate
-    const cigarettesAvoided = streak * cigarettesPerDay;
+    const vapeFreeStreak = calculateVapeFreeStreak();
+    const cigarettesPerDay = 10;
+    const cigarettesAvoided = vapeFreeStreak * cigarettesPerDay;
     const minutesPerCigarette = 11;
     const totalMinutes = cigarettesAvoided * minutesPerCigarette;
     const hours = Math.floor(totalMinutes / 60);
     return hours;
   };
 
+  const calculateYearTotals = () => {
+    if (!quitVapeDate) return { cleanDays: 0, cigaretteDays: 0, vapeDays: 0, totalDays: 0 };
+
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const startOfYear = new Date(currentYear, 0, 1);
+    const quitDateObj = new Date(quitVapeDate);
+
+    const startDate = quitDateObj > startOfYear ? quitDateObj : startOfYear;
+
+    let cleanDays = 0;
+    let cigaretteDays = 0;
+    let vapeDays = 0;
+
+    for (let d = new Date(startDate); d <= now; d.setDate(d.getDate() + 1)) {
+      const dateStr = d.toISOString().split('T')[0];
+      const status = dayStatuses[dateStr] || 'clean';
+
+      if (status === 'clean') cleanDays++;
+      else if (status === 'cigarette') cigaretteDays++;
+      else if (status === 'vape') vapeDays++;
+    }
+
+    const totalDays = cleanDays + cigaretteDays + vapeDays;
+
+    return { cleanDays, cigaretteDays, vapeDays, totalDays };
+  };
+
   const getMilestoneProgress = () => {
-    const days = calculateStreak();
+    const days = calculateVapeFreeStreak();
     const milestones = [
       { days: 1, label: '24 Hours', description: 'Carbon monoxide leaves your body', icon: '💨' },
       { days: 3, label: '3 Days', description: 'Breathing becomes easier', icon: '🫁' },
@@ -121,7 +212,7 @@ export default function SmokeFreeTracker() {
   };
 
   const getCalendarDays = () => {
-    if (!quitDate) return [];
+    if (!quitVapeDate) return [];
 
     const year = currentMonth.getFullYear();
     const month = currentMonth.getMonth();
@@ -132,22 +223,19 @@ export default function SmokeFreeTracker() {
 
     const days = [];
 
-    // Add empty cells for days before month starts
     for (let i = 0; i < startingDayOfWeek; i++) {
       days.push(null);
     }
 
-    // Add all days in month
     for (let day = 1; day <= lastDay.getDate(); day++) {
       const date = new Date(year, month, day);
       const dateStr = date.toISOString().split('T')[0];
-      const quitDateObj = new Date(quitDate);
+      const quitDateObj = new Date(quitVapeDate);
       const todayObj = new Date();
       todayObj.setHours(0, 0, 0, 0);
 
-      // Only show days between quit date and today
       if (date >= quitDateObj && date <= todayObj) {
-        const status = dayStatuses[dateStr] !== undefined ? dayStatuses[dateStr] : true;
+        const status = dayStatuses[dateStr] || 'clean';
         days.push({ date, dateStr, status });
       } else {
         days.push(null);
@@ -169,23 +257,25 @@ export default function SmokeFreeTracker() {
     }
   };
 
-  const streak = calculateStreak();
+  const vapeFreeStreak = calculateVapeFreeStreak();
+  const fullyCleanStreak = calculateFullyCleanStreak();
   const moneySaved = calculateMoneySaved();
   const hoursRegained = calculateLifeRegained();
   const { nextMilestone, allMilestones } = getMilestoneProgress();
   const calendarDays = getCalendarDays();
+  const { cleanDays, cigaretteDays, vapeDays, totalDays } = calculateYearTotals();
 
   return (
-    <div className="rounded-xl border-2 border-green-200 bg-gradient-to-br from-green-50 to-emerald-50 p-6 col-span-2">
+    <div className="rounded-xl border-2 border-green-200 bg-gradient-to-br from-green-50 to-emerald-50 p-6">
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
           <div className="text-5xl">🚭</div>
           <div>
-            <h3 className="text-2xl font-bold text-gray-900">Smoke-Free Journey</h3>
-            <p className="text-sm text-gray-600">Click calendar days to mark if you smoked</p>
+            <h3 className="text-2xl font-bold text-gray-900">Vape-Free Journey</h3>
+            <p className="text-sm text-gray-600">Click calendar days to set your status</p>
           </div>
         </div>
-        {quitDate && (
+        {quitVapeDate && (
           <button
             onClick={() => setIsSettingDate(true)}
             className="text-xs text-gray-500 hover:text-gray-700 underline"
@@ -195,9 +285,9 @@ export default function SmokeFreeTracker() {
         )}
       </div>
 
-      {!quitDate || isSettingDate ? (
+      {!quitVapeDate || isSettingDate ? (
         <div className="bg-white rounded-xl p-8 shadow-sm">
-          <h4 className="text-lg font-semibold text-gray-900 mb-4">When did you quit smoking?</h4>
+          <h4 className="text-lg font-semibold text-gray-900 mb-4">When did you quit vaping?</h4>
           <input
             type="date"
             value={selectedDate}
@@ -210,9 +300,9 @@ export default function SmokeFreeTracker() {
               onClick={saveQuitDate}
               className="flex-1 rounded-lg bg-green-600 px-6 py-3 text-white font-semibold hover:bg-green-700 transition-colors"
             >
-              {quitDate ? 'Update Date' : 'Start Tracking'}
+              {quitVapeDate ? 'Update Date' : 'Start Tracking'}
             </button>
-            {isSettingDate && quitDate && (
+            {isSettingDate && quitVapeDate && (
               <button
                 onClick={() => setIsSettingDate(false)}
                 className="px-6 py-3 text-gray-600 hover:text-gray-900 font-medium"
@@ -224,23 +314,84 @@ export default function SmokeFreeTracker() {
         </div>
       ) : (
         <div className="space-y-6">
-          {/* Main Stats */}
+          {/* Dual Streak Stats */}
           <div className="grid grid-cols-3 gap-4">
             <div className="bg-white rounded-xl p-6 text-center shadow-sm border-4 border-green-500">
-              <p className="text-6xl font-bold text-green-600 mb-2">{streak}</p>
-              <p className="text-sm font-bold text-gray-900">Day Streak</p>
-              <p className="text-xs text-gray-500 mt-1">Current smoke-free streak</p>
+              <p className="text-6xl font-bold text-green-600 mb-2">{vapeFreeStreak}</p>
+              <p className="text-sm font-bold text-gray-900">Vape-Free</p>
+              <p className="text-xs text-gray-500 mt-1">Primary streak</p>
+            </div>
+            <div className="bg-white rounded-xl p-6 text-center shadow-sm border-2 border-emerald-200">
+              <p className="text-5xl font-bold text-emerald-600 mb-2">{fullyCleanStreak}</p>
+              <p className="text-sm font-medium text-gray-700">Fully Clean</p>
+              <p className="text-xs text-gray-500 mt-1">No vape or cigs</p>
             </div>
             <div className="bg-white rounded-xl p-6 text-center shadow-sm border-2 border-blue-200">
               <p className="text-5xl font-bold text-blue-600 mb-2">${moneySaved}</p>
               <p className="text-sm font-medium text-gray-700">Money Saved</p>
-              <p className="text-xs text-gray-500 mt-1">$8/day × {streak} days</p>
+              <p className="text-xs text-gray-500 mt-1">Total saved</p>
             </div>
-            <div className="bg-white rounded-xl p-6 text-center shadow-sm border-2 border-purple-200">
-              <p className="text-5xl font-bold text-purple-600 mb-2">{hoursRegained}</p>
-              <p className="text-sm font-medium text-gray-700">Hours Regained</p>
-              <p className="text-xs text-gray-500 mt-1">Life expectancy gained</p>
+          </div>
+
+          {/* Year Overview */}
+          <div className="bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 rounded-xl p-6 shadow-lg border-2 border-indigo-300">
+            <div className="flex items-center justify-between mb-4">
+              <h4 className="font-bold text-gray-900 text-lg flex items-center gap-2">
+                <span className="text-2xl">📊</span>
+                {new Date().getFullYear()} Year Overview
+              </h4>
+              <span className="text-sm font-medium text-gray-600">{totalDays} days tracked</span>
             </div>
+
+            <div className="grid grid-cols-3 gap-3 mb-4">
+              <div className="bg-white rounded-lg p-4 text-center shadow-sm border-2 border-green-400">
+                <p className="text-3xl font-bold text-green-600 mb-1">{cleanDays}</p>
+                <p className="text-xs font-bold text-gray-900">Fully Clean</p>
+                <p className="text-xs text-gray-500 mt-1">{totalDays > 0 ? Math.round((cleanDays / totalDays) * 100) : 0}%</p>
+              </div>
+              <div className="bg-white rounded-lg p-4 text-center shadow-sm border-2 border-yellow-400">
+                <p className="text-3xl font-bold text-yellow-600 mb-1">{cigaretteDays}</p>
+                <p className="text-xs font-bold text-gray-900">Cigarette</p>
+                <p className="text-xs text-gray-500 mt-1">{totalDays > 0 ? Math.round((cigaretteDays / totalDays) * 100) : 0}%</p>
+              </div>
+              <div className="bg-white rounded-lg p-4 text-center shadow-sm border-2 border-red-400">
+                <p className="text-3xl font-bold text-red-600 mb-1">{vapeDays}</p>
+                <p className="text-xs font-bold text-gray-900">Vaped</p>
+                <p className="text-xs text-gray-500 mt-1">{totalDays > 0 ? Math.round((vapeDays / totalDays) * 100) : 0}%</p>
+              </div>
+            </div>
+
+            {/* Visual bar */}
+            <div className="w-full bg-white rounded-full h-8 overflow-hidden shadow-inner border-2 border-gray-200">
+              <div className="flex h-full">
+                <div
+                  className="bg-gradient-to-r from-green-500 to-emerald-500 flex items-center justify-center text-white text-xs font-bold transition-all duration-500"
+                  style={{ width: `${totalDays > 0 ? (cleanDays / totalDays) * 100 : 0}%` }}
+                >
+                  {totalDays > 0 && cleanDays > 0 && `${Math.round((cleanDays / totalDays) * 100)}%`}
+                </div>
+                <div
+                  className="bg-gradient-to-r from-yellow-500 to-orange-500 flex items-center justify-center text-white text-xs font-bold transition-all duration-500"
+                  style={{ width: `${totalDays > 0 ? (cigaretteDays / totalDays) * 100 : 0}%` }}
+                >
+                  {totalDays > 0 && cigaretteDays > 0 && `${Math.round((cigaretteDays / totalDays) * 100)}%`}
+                </div>
+                <div
+                  className="bg-gradient-to-r from-red-500 to-rose-500 flex items-center justify-center text-white text-xs font-bold transition-all duration-500"
+                  style={{ width: `${totalDays > 0 ? (vapeDays / totalDays) * 100 : 0}%` }}
+                >
+                  {totalDays > 0 && vapeDays > 0 && `${Math.round((vapeDays / totalDays) * 100)}%`}
+                </div>
+              </div>
+            </div>
+
+            {vapeFreeStreak > 0 && (
+              <div className="mt-4 text-center">
+                <p className="text-sm font-bold text-green-700">
+                  💪 {vapeFreeStreak} days vape-free! Keep going!
+                </p>
+              </div>
+            )}
           </div>
 
           {/* Calendar View */}
@@ -286,21 +437,22 @@ export default function SmokeFreeTracker() {
                 return (
                   <button
                     key={day.dateStr}
-                    onClick={() => toggleDayStatus(day.dateStr)}
+                    onClick={() => openDayModal(day.dateStr)}
                     className={`aspect-square rounded-lg border-2 flex flex-col items-center justify-center transition-all hover:scale-105 ${
                       isToday
                         ? 'border-blue-500 ring-2 ring-blue-300'
-                        : day.status
+                        : day.status === 'clean'
                         ? 'border-green-500 bg-green-50'
+                        : day.status === 'cigarette'
+                        ? 'border-yellow-500 bg-yellow-50'
                         : 'border-red-500 bg-red-50'
                     }`}
-                    title={day.status ? 'Smoke-free day! Click to mark as smoked' : 'Smoked this day. Click to mark as smoke-free'}
                   >
                     <span className="text-xs font-medium text-gray-700 mb-1">
                       {day.date.getDate()}
                     </span>
                     <span className="text-2xl">
-                      {day.status ? '✓' : '✗'}
+                      {day.status === 'clean' ? '✓' : day.status === 'cigarette' ? '🚬' : '💨'}
                     </span>
                   </button>
                 );
@@ -310,21 +462,21 @@ export default function SmokeFreeTracker() {
             <div className="mt-4 flex items-center justify-center gap-6 text-sm">
               <div className="flex items-center gap-2">
                 <div className="w-6 h-6 rounded border-2 border-green-500 bg-green-50 flex items-center justify-center text-sm">✓</div>
-                <span className="text-gray-600">Smoke-free</span>
+                <span className="text-gray-600">Fully clean</span>
               </div>
               <div className="flex items-center gap-2">
-                <div className="w-6 h-6 rounded border-2 border-red-500 bg-red-50 flex items-center justify-center text-sm">✗</div>
-                <span className="text-gray-600">Smoked</span>
+                <div className="w-6 h-6 rounded border-2 border-yellow-500 bg-yellow-50 flex items-center justify-center text-sm">🚬</div>
+                <span className="text-gray-600">Cigarette</span>
               </div>
               <div className="flex items-center gap-2">
-                <div className="w-6 h-6 rounded border-2 border-blue-500 ring-2 ring-blue-300 flex items-center justify-center text-sm">•</div>
-                <span className="text-gray-600">Today</span>
+                <div className="w-6 h-6 rounded border-2 border-red-500 bg-red-50 flex items-center justify-center text-sm">💨</div>
+                <span className="text-gray-600">Vaped</span>
               </div>
             </div>
           </div>
 
-          {/* Progress to Next Milestone */}
-          {nextMilestone && streak < 365 && (
+          {/* Milestones */}
+          {nextMilestone && vapeFreeStreak < 365 && (
             <div className="bg-white rounded-xl p-6 shadow-sm border-2 border-blue-200">
               <div className="flex items-center justify-between mb-3">
                 <div>
@@ -336,7 +488,7 @@ export default function SmokeFreeTracker() {
                 </div>
                 <div className="text-right">
                   <span className="text-3xl font-bold text-blue-600 block">
-                    {nextMilestone.days - streak}
+                    {nextMilestone.days - vapeFreeStreak}
                   </span>
                   <span className="text-xs text-gray-500">days to go</span>
                 </div>
@@ -345,60 +497,78 @@ export default function SmokeFreeTracker() {
                 <div
                   className="bg-gradient-to-r from-green-500 via-blue-500 to-purple-500 h-4 rounded-full transition-all duration-500"
                   style={{
-                    width: `${Math.min((streak / nextMilestone.days) * 100, 100)}%`,
+                    width: `${Math.min((vapeFreeStreak / nextMilestone.days) * 100, 100)}%`,
                   }}
                 ></div>
               </div>
             </div>
           )}
 
-          {/* Milestones Achieved */}
-          <div className="bg-white rounded-xl p-6 shadow-sm">
-            <h4 className="font-bold text-gray-900 mb-4 text-lg">Health Milestones</h4>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {allMilestones.map((milestone) => {
-                const achieved = streak >= milestone.days;
-                return (
-                  <div
-                    key={milestone.days}
-                    className={`flex items-center gap-3 p-4 rounded-lg transition-all ${
-                      achieved
-                        ? 'bg-gradient-to-r from-green-50 to-emerald-50 border-2 border-green-500 shadow-md'
-                        : 'bg-gray-50 border-2 border-gray-200'
-                    }`}
-                  >
-                    <div className={`text-3xl ${achieved ? '' : 'opacity-30 grayscale'}`}>
-                      {milestone.icon}
-                    </div>
-                    <div className="flex-1">
-                      <p className={`font-bold ${achieved ? 'text-green-900' : 'text-gray-600'}`}>
-                        {milestone.label}
-                      </p>
-                      <p className={`text-xs ${achieved ? 'text-green-700' : 'text-gray-500'}`}>
-                        {milestone.description}
-                      </p>
-                    </div>
-                    {achieved && (
-                      <span className="text-xs bg-green-600 text-white px-3 py-1.5 rounded-full font-bold shadow-sm">
-                        ✓ DONE
-                      </span>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          {streak >= 7 && (
+          {vapeFreeStreak >= 7 && (
             <div className="bg-gradient-to-r from-yellow-50 to-orange-50 border-2 border-yellow-400 rounded-xl p-6 text-center">
               <p className="text-2xl font-bold text-gray-900 mb-2">
-                🎊 You're doing amazing! Keep it up! 🎊
+                🎊 You're doing great! 🎊
               </p>
               <p className="text-gray-700">
-                Every day smoke-free is a victory. You're stronger than you think!
+                Every vape-free day is progress. Be kind to yourself.
               </p>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Day Status Modal */}
+      {showDayModal && selectedDayForEdit && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onClick={() => setShowDayModal(false)}>
+          <div className="bg-white rounded-xl p-6 max-w-sm w-full mx-4 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-lg font-bold text-gray-900 mb-4">
+              Set status for {new Date(selectedDayForEdit).toLocaleDateString('en-US', { month: 'long', day: 'numeric' })}
+            </h3>
+            <div className="space-y-3">
+              <button
+                onClick={() => setDayStatus(selectedDayForEdit, 'clean')}
+                className="w-full p-4 rounded-lg border-2 border-green-500 bg-green-50 hover:bg-green-100 transition-colors text-left"
+              >
+                <div className="flex items-center gap-3">
+                  <span className="text-3xl">✓</span>
+                  <div>
+                    <p className="font-bold text-gray-900">Fully Clean</p>
+                    <p className="text-xs text-gray-600">No vaping, no cigarettes</p>
+                  </div>
+                </div>
+              </button>
+              <button
+                onClick={() => setDayStatus(selectedDayForEdit, 'cigarette')}
+                className="w-full p-4 rounded-lg border-2 border-yellow-500 bg-yellow-50 hover:bg-yellow-100 transition-colors text-left"
+              >
+                <div className="flex items-center gap-3">
+                  <span className="text-3xl">🚬</span>
+                  <div>
+                    <p className="font-bold text-gray-900">Cigarette Only</p>
+                    <p className="text-xs text-gray-600">Had a cigarette, but no vaping</p>
+                  </div>
+                </div>
+              </button>
+              <button
+                onClick={() => setDayStatus(selectedDayForEdit, 'vape')}
+                className="w-full p-4 rounded-lg border-2 border-red-500 bg-red-50 hover:bg-red-100 transition-colors text-left"
+              >
+                <div className="flex items-center gap-3">
+                  <span className="text-3xl">💨</span>
+                  <div>
+                    <p className="font-bold text-gray-900">Vaped</p>
+                    <p className="text-xs text-gray-600">Used a vape today</p>
+                  </div>
+                </div>
+              </button>
+            </div>
+            <button
+              onClick={() => setShowDayModal(false)}
+              className="w-full mt-4 p-3 rounded-lg bg-gray-100 hover:bg-gray-200 transition-colors text-gray-700 font-medium"
+            >
+              Cancel
+            </button>
+          </div>
         </div>
       )}
     </div>

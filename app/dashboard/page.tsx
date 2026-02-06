@@ -3,9 +3,9 @@
 import { useState, useEffect } from 'react';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import Link from 'next/link';
-import { useAuth } from '@/lib/hooks/useLocalAuth';
 import { storage } from '@/lib/storage/localStorage';
 import { getTodayString } from '@/lib/utils/date';
+import DashboardInsights from '@/components/insights/DashboardInsights';
 
 const MOTIVATIONAL_QUOTES = [
   { quote: "Every day is a chance to be better than yesterday.", author: "Unknown" },
@@ -26,7 +26,6 @@ const MOTIVATIONAL_QUOTES = [
 ];
 
 export default function DashboardPage() {
-  const { user } = useAuth();
   const [dailyQuote, setDailyQuote] = useState(MOTIVATIONAL_QUOTES[0]);
   const [stats, setStats] = useState({
     smokeFreeDays: 0,
@@ -56,20 +55,34 @@ export default function DashboardPage() {
   }, []);
 
   const loadStats = () => {
-    // Smoke-free days
+    // Vape-free days (cigarettes don't break streak)
     const trackers = storage.get('lifeos_trackers') || {};
     let smokeFreeDays = 0;
-    if (trackers.smokeFree?.quitDate && trackers.smokeFree?.dayStatuses) {
+    const quitDate = trackers.smokeFree?.quitVapeDate || trackers.smokeFree?.quitDate;
+
+    if (quitDate && trackers.smokeFree?.dayStatuses) {
       const today = new Date();
       today.setHours(0, 0, 0, 0);
       let streak = 0;
 
-      for (let d = new Date(today); d >= new Date(trackers.smokeFree.quitDate); d.setDate(d.getDate() - 1)) {
+      for (let d = new Date(today); d >= new Date(quitDate); d.setDate(d.getDate() - 1)) {
         const dateStr = d.toISOString().split('T')[0];
-        if (trackers.smokeFree.dayStatuses[dateStr] === true || trackers.smokeFree.dayStatuses[dateStr] === undefined) {
+        const status = trackers.smokeFree.dayStatuses[dateStr];
+
+        // Handle both old boolean system and new 3-state system
+        if (typeof status === 'string') {
+          // New system: 'clean', 'cigarette', 'vape'
+          if (status === 'vape') {
+            break; // Vaping breaks the streak
+          }
           streak++;
         } else {
-          break;
+          // Old system: boolean
+          if (status === true || status === undefined) {
+            streak++;
+          } else {
+            break;
+          }
         }
       }
       smokeFreeDays = streak;
@@ -99,7 +112,7 @@ export default function DashboardPage() {
 
   const quickStats = [
     {
-      title: 'Smoke-Free Streak',
+      title: 'Vape-Free Streak',
       value: stats.smokeFreeDays > 0 ? `${stats.smokeFreeDays}` : '0',
       subtitle: stats.smokeFreeDays > 0 ? 'days strong!' : 'Get started',
       icon: '🚭',
@@ -153,7 +166,7 @@ export default function DashboardPage() {
       <div className="space-y-6">
         <div>
           <h1 className="text-4xl font-bold text-gray-900">
-            {getGreeting()}, {user?.displayName?.split(' ')[0] || 'there'}!
+            {getGreeting()}!
           </h1>
           <p className="mt-2 text-lg text-gray-600">
             {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
@@ -175,6 +188,9 @@ export default function DashboardPage() {
             </div>
           </div>
         </div>
+
+        {/* Pattern Insights */}
+        <DashboardInsights />
 
         {/* Quick Stats */}
         <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
@@ -252,13 +268,13 @@ export default function DashboardPage() {
               <div className="text-5xl">🎊</div>
               <div>
                 <h3 className="text-xl font-bold text-gray-900 mb-2">
-                  {stats.smokeFreeDays} Days Smoke-Free!
+                  {stats.smokeFreeDays} Days Vape-Free!
                 </h3>
                 <p className="text-gray-700 mb-2">
-                  You've saved approximately <span className="font-bold text-green-700">${stats.smokeFreeDays * 8}</span> and gained back precious time!
+                  Every vape-free day is progress. You're doing great!
                 </p>
                 <p className="text-sm text-gray-600">
-                  Keep up the incredible work. Every day smoke-free is a victory! 💪
+                  Be kind to yourself. Progress over perfection. 💪
                 </p>
               </div>
             </div>

@@ -2,6 +2,8 @@
 
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import WeeklyChecklist from './components/WeeklyChecklist';
+import GroceryList from './components/GroceryList';
+import WeeklyInsights from './components/WeeklyInsights';
 
 export default function WeeklyPage() {
   return (
@@ -10,9 +12,13 @@ export default function WeeklyPage() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-3xl font-bold text-gray-900">Weekly Review</h1>
-            <p className="mt-1 text-gray-600">Track weekly tasks and reflect</p>
+            <p className="mt-1 text-gray-600">Track weekly tasks and plan ahead</p>
           </div>
         </div>
+
+        <WeeklyInsights />
+
+        <GroceryList />
 
         <WeeklyChecklist />
 

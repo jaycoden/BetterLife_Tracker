@@ -3,6 +3,8 @@
 import Link from 'next/link';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import DailyHabits from './components/DailyHabits';
+import EnergyCheckin from './components/EnergyCheckin';
+import SelfExpressionTracker from './components/SelfExpressionTracker';
 
 export default function DailyPage() {
   return (
@@ -10,8 +12,12 @@ export default function DailyPage() {
       <div className="space-y-6">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Daily Check-in</h1>
-          <p className="mt-1 text-gray-600">Track your daily habits and routines</p>
+          <p className="mt-1 text-gray-600">Check in with yourself and track habits</p>
         </div>
+
+        <EnergyCheckin />
+
+        <SelfExpressionTracker />
 
         <DailyHabits />
 

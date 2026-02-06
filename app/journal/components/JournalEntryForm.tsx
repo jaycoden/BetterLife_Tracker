@@ -2,17 +2,17 @@
 
 import { useState } from 'react';
 import { getJournalEntries, setJournalEntries } from '@/lib/storage/localStorage';
-import { useAuth } from '@/lib/hooks/useLocalAuth';
+import { getTodayString } from '@/lib/utils/date';
 
 interface JournalEntryFormProps {
   onSave: () => void;
 }
 
 export default function JournalEntryForm({ onSave }: JournalEntryFormProps) {
-  const { user } = useAuth();
   const [content, setContent] = useState('');
   const [mood, setMood] = useState<string>('');
   const [tags, setTags] = useState('');
+  const [entryDate, setEntryDate] = useState(getTodayString());
   const [isSaving, setIsSaving] = useState(false);
 
   const moods = [
@@ -28,10 +28,12 @@ export default function JournalEntryForm({ onSave }: JournalEntryFormProps) {
     setIsSaving(true);
 
     const entries = getJournalEntries();
+    // Convert the selected date to ISO string at midnight local time
+    const selectedDate = new Date(entryDate + 'T00:00:00');
     const newEntry = {
       id: Date.now().toString(),
-      userId: user?.id || '',
-      date: new Date().toISOString(),
+      userId: '',
+      date: selectedDate.toISOString(),
       content,
       mood,
       tags: tags.split(',').map(t => t.trim()).filter(t => t),
@@ -45,6 +47,7 @@ export default function JournalEntryForm({ onSave }: JournalEntryFormProps) {
     setContent('');
     setMood('');
     setTags('');
+    setEntryDate(getTodayString());
     setIsSaving(false);
     onSave();
   };
@@ -54,6 +57,21 @@ export default function JournalEntryForm({ onSave }: JournalEntryFormProps) {
       <h2 className="text-xl font-semibold text-gray-900 mb-4">New Journal Entry</h2>
 
       <div className="space-y-4">
+        <div>
+          <label htmlFor="entryDate" className="block text-sm font-medium text-gray-700 mb-2">
+            Entry Date
+          </label>
+          <input
+            id="entryDate"
+            type="date"
+            value={entryDate}
+            max={getTodayString()}
+            onChange={(e) => setEntryDate(e.target.value)}
+            className="w-full rounded-lg border border-gray-300 px-4 py-2 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          <p className="text-xs text-gray-500 mt-1">Set the date for this journal entry</p>
+        </div>
+
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-2">
             How are you feeling?

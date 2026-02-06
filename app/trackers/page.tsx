@@ -4,6 +4,7 @@ import DashboardLayout from '@/components/layout/DashboardLayout';
 import WaterTracker from './components/WaterTracker';
 import DogCareTracker from './components/DogCareTracker';
 import SmokeFreeTracker from './components/SmokeFreeTracker';
+import UrgeLog from './components/UrgeLog';
 
 export default function TrackersPage() {
   return (
@@ -16,8 +17,11 @@ export default function TrackersPage() {
           </div>
         </div>
 
+        <SmokeFreeTracker />
+
+        <UrgeLog />
+
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-          <SmokeFreeTracker />
           <WaterTracker />
           <DogCareTracker />
         </div>
